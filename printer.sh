@@ -2,20 +2,21 @@
 
 ### Addigy-Specific Variables ###
 ## Uncomment lines as needed
-pkg_file_name="Canon_PS_Installer.pkg" # TODO: Remove this when done testing
+pkg_file_name=""
 
 ### Printer Variables ###
 ## REQUIRED VARIABLES - you must enter something for these! ##
-current_version="1.3.0" # useful for deploying printer alterations over time. Should match the Custom Software version in Addigy.
-display_name="Test Printer" # The printer name displayed to users, once deployed this should not change; changing the name will result in duplicate printers.
-queue_name="Test_Printer" # Queue name of the printer - no spaces, use underscores! Best to use an underscored version of $display_name.
-address="192.168.1.23" # Network address - such as an IP, hostname, or DNS-SD address.
+current_version="" # useful for deploying printer alterations over time. Should match the Custom Software version in Addigy.
+display_name="" # The printer name displayed to users, once deployed this should not change; changing the name will result in duplicate printers.
+queue_name="" # Queue name of the printer - no spaces, use underscores! Best to use an underscored version of $display_name.
+address="" # Network address - such as an IP, hostname, or DNS-SD address.
 
 ## OPTIONAL VARIABLES ## - but, unless you're using a totally vanilla AirPrint setup, you'll probably use at least driver_ppd.
-driver_ppd="/Library/Printers/PPDs/Contents/Resources/CNMCIRAC5750S2.ppd.gz" # If this is empty, the script will default to the AirPrint PPD.
-custom_ppd="custom.ppd" # Custom PPD file. Use the name of the file you uploaded in Addigy.
-protocol="lpd" # If empty, defaults to ipp. Option examples: dnssd, lpd, ipp, ipps, http, socket (use ipp for AirPrint)
-location="Northway Church" # Physical location of the printer.
+driver_ppd="" # If this is empty, the script will default to the AirPrint PPD.
+custom_ppd="" # Custom PPD file. Use the name of the file you uploaded in Addigy.
+protocol="" # If empty, defaults to ipp. Option examples: dnssd, lpd, ipp, ipps, http, socket (use ipp for AirPrint)
+location="" # Physical location of the printer.
+preset_file="" # Presets file for the printer.
 
 # Specific options for the printer.
 # To find available options, manually add the printer to a Mac and run: lpoptions -p "$insert_cups_printer_name_here" -l
@@ -92,14 +93,6 @@ function custom_ppd_exists {
     fi
 }
 
-function pkg_install_needed {
-    if default_ppd_set && default_ppd_exists; then
-        return 1
-    else 
-        return 0
-    fi
-}
-
 function driver_pkg_set {
     # Check if the driver package file is set
     if [[ -n "$pkg_file_name" ]]; then
@@ -123,6 +116,43 @@ function install_driver_pkg {
     /usr/sbin/installer -pkg "$pkg_file_name" -target /
 }
 
+################################################
+### PRESET FUNCTIONS ###########################
+################################################
+default_preset_file="/Library/Preferences/com.apple.print.custompresets.plist"
+function preset_file_set {
+    # Check if the preset file is set
+    if [[ -n "$preset_file" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+function preset_file_exists {
+    # Check if the preset file exists
+    if [[ -e "$preset_file" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+function remove_default_presets {
+    if [[ -e "$default_preset_file" ]]; then
+        /bin/rm -f "$default_preset_file"
+    fi
+}
+
+function install_preset_file {
+    # Remove the default preset file
+    remove_default_presets
+    
+    # Install the preset file
+    /bin/cp "$preset_file" "$default_preset_file"
+    /bin/chmod 644 "$default_preset_file"
+    /usr/sbin/chown root:wheel "$default_preset_file"
+}
 ################################################
 ### PRESENCE/VERSION/INSTALL FUNCTIONS #########
 ################################################
@@ -150,7 +180,7 @@ function get_installed_version {
 fi
 }
 
-function needs_install {
+function out_of_date {
     # Compare the installed version with the current version.
     if [ "$(converted_version "$installed_version")" -ge "$(converted_version "$current_version")" ]; then
         return 1
@@ -207,68 +237,86 @@ function update_receipt {
 ################################################
 ### MAIN LOGIC #################################
 ################################################
-# Check if a manufacturer PPD file is set - if not, use the AirPrint PPD
-if use_airprint_ppd; then
-    echo "No driver PPD file set - using AirPrint PPD"
-else
-    echo "Driver PPD file path set to $driver_ppd"
-fi
+function run_printer_installer {
+    # Check if a manufacturer PPD file is set - if not, use the AirPrint PPD
+    if use_airprint_ppd; then
+        echo "No driver PPD file set - using AirPrint PPD"
+    else
+        echo "Driver PPD file path set to $driver_ppd"
+    fi
 
-# Set protocol to ipp if not manually
-set_protocol && echo "Protocol set to $protocol"
+    # Set protocol to ipp if not manually
+    set_protocol && echo "Protocol set to $protocol"
 
-# Check if driver package install is needed
-if pkg_install_needed; then
-    echo "Default driver is set, but not found. Package install needed."
-    if driver_pkg_set && driver_pkg_exists; then
-        echo "Driver package found - installing"
-        install_driver_pkg && echo "Driver package installed successfully" || { echo "Driver package install failed"; exit 1; }
-        if default_ppd_exists; then
-            echo "Default driver file now present - continuing"
+    if driver_pkg_set; then
+        if driver_pkg_exists; then
+            echo "Installing driver package $pkg_file_name"
+            install_driver_pkg && echo "Driver package installed successfully" || { echo "Driver package install failed"; exit 1; }
         else
-            echo "Default driver file still not found - check to make sure the pkg contains the correct PPD"
+            echo "Driver package file not found - check your variables and try again."
             exit 1
         fi
-    elif driver_pkg_set && ! driver_pkg_exists; then
-        echo "Driver package set but file not found. Check your variables and try again."
-        exit 1
     else
-        echo "Driver package not set. Check your variables and try again."
-        exit 1
+        echo "Driver package not set - continuing"
     fi
-else
-    echo "Default driver file found - no package install needed"
-fi
 
-# Check if a custom PPD file is set - if so, use that instead of the default PPD
-if custom_ppd_set; then
-    echo "Custom PPD file path set to $custom_ppd"
-    if custom_ppd_exists; then
-        echo "Custom PPD found - setting that as the one to use"
-        driver_ppd="$custom_ppd"
+    # Check if driver package install is needed
+    if default_ppd_set; then
+        if default_ppd_exists; then
+            echo "Default PPD found - continuing"
+        else
+            echo "Default PPD file not found - check your variables/packages and try again."
+            exit 1
+        fi
     else
-        echo "No custom PPD found - check your variables and try again."
-        exit 1
+        echo "No default PPD file set - continuing"
     fi
-fi
+
+    # Check if a custom PPD file is set - if so, use that instead of the default PPD
+    if custom_ppd_set; then
+        echo "Custom PPD file path set to $custom_ppd"
+        if custom_ppd_exists; then
+            echo "Custom PPD found - setting that as the one to use"
+            driver_ppd="$custom_ppd"
+        else
+            echo "No custom PPD found - check your variables and try again."
+            exit 1
+        fi
+    fi
+
+    install_printer && echo "Printer installed successfully" || { echo "Printer install failed"; exit 1; }
+    echo "If you got a message about printer drivers being deprecated, you can ignore it."
+
+    # Check if a preset file is set - if so, install it
+    if preset_file_set; then
+        if preset_file_exists; then
+            echo "Preset file found - installing"
+            install_preset_file && echo "Preset file installed successfully" || { echo "Preset file install failed"; exit 1; }
+        else
+            echo "Preset file not found - check your variables and try again."
+            exit 1
+        fi
+    else
+        echo "No preset file set - continuing"
+    fi
+
+    update_receipt && echo "Receipt updated successfully" || { echo "Receipt update failed"; exit 1; }
+}
 
 # Check if the printer is already installed and if so, what version.
 get_installed_version
 if printer_exists; then
     echo "Printer queue already exists"
-    if needs_install; then
+    if out_of_date; then
         echo "The installed printer (${queue_name}) needs to be updated, will remove and reinstall."
         remove_printer
-        install_printer && echo "Printer installed successfully" || { echo "Printer install failed"; exit 1; }
-        echo "If you got a message about printer drivers being deprecated, you can ignore it."
-        update_receipt && echo "Receipt updated successfully" || { echo "Receipt update failed"; exit 1; }
+        run_printer_installer
     else
         echo "The installed printer (${queue_name}) is already up-to-date, no need to reinstall."
     fi
 else
     echo "Printer queue does not exist - installing"
-    install_printer && echo "Printer installed successfully" || { echo "Printer install failed"; exit 1; }
-    update_receipt && echo "Receipt updated successfully" || { echo "Receipt update failed"; exit 1; }
+    run_printer_installer
 fi
 
 exit 0

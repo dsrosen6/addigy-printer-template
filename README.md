@@ -1,1 +1,2 @@
 # addigy-printer-template
+Easy-to-use custom printer template for Addigy - just fill your printer's info in the variables in the script in a Smart Software item. This script will make a "receipt" which will log the current version of the printer, making future changes easy. I suggest setting the version the same as your Addigy Smart Software item, and keeping them identical with future updates, for easy support agent comprehension.
